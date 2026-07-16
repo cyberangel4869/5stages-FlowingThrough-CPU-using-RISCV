@@ -116,3 +116,36 @@ flowchart TB
     class GlobalCtrl control
     class ROM,RAM mem
 ```
+
+### 结构图说明
+#### 1. 五级流水线结构
+IF阶段：PC_BTB生成PC地址，ROM读取指令
+
+ID阶段：指令译码、寄存器读取、PC预测计算
+
+EX阶段：数据前传、操作数选择、ALU运算、跳转控制
+
+MEM阶段：数据存储器读写
+
+WB阶段：写回数据选择和控制
+
+#### 2. 流水线寄存器
+每个阶段之间通过D触发器组隔离（IF-ID、ID-EX、EX-MEM、MEM-WB）
+
+确保时序正确，避免数据冲突
+
+#### 3. 关键控制路径
+数据前传：通过FCU检测数据冒险，将EX/MEM/WB阶段的结果前传到EX阶段
+
+跳转控制：JCU生成跳转信号，反馈到IF阶段修改PC
+
+分支预测：BHT提供分支预测信息，配合BTB优化取指
+
+#### 4. 全局控制信号
+Bubble：流水线暂停
+
+clean：指令冲刷
+
+we/waddr/wdata：寄存器写回控制
+
+data1_update/data2_update：数据前传使能
