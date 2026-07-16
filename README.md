@@ -238,48 +238,100 @@ stateDiagram-v2
 
 * 状态值向跳转/不跳转方向饱和变化
 
-三、协同工作流程
-3.1 预测阶段（IF阶段）
-3.2 更新阶段（EX阶段）
-3.3 完整流水线流程
+### 协同工作流程
+#### 3.1 预测阶段（IF阶段）
+```mermaid
+sequenceDiagram
+    participant PC as PC寄存器
+    participant BHT as BHT
+    participant BTB as BTB存储
+    participant ALU as ALU/JCU
+    
+    Note over PC,ALU: 预测阶段（取指时）
+    PC->>BHT: 当前PC
+    BHT-->>PC: serch_en(预测结果)
+    PC->>BTB: 用PC[9:2]查表
+    BTB-->>PC: target[index]
+    alt serch_en=1 && BTB_hit=1
+        PC->>PC: PC = target[index]
+    else serch_en=0 或 BTB未命中
+        PC->>PC: PC = PC + 4
+    end
+```
+#### 3.2 更新阶段（EX阶段）
+```mermaid
+sequenceDiagram
+    participant EX as EX阶段
+    participant JCU as JumpCtrlUnion
+    participant BHT as BHT
+    participant BTB as BTB存储
+    participant PC as PC寄存器
+    
+    Note over EX,PC: 更新阶段（执行时）
+    EX->>JCU: 指令信息
+    JCU-->>EX: jump, is_JBtype, jump_dist
+    
+    alt is_JBtype=1 (跳转指令)
+        EX->>BHT: jump, is_JBtype
+        BHT->>BHT: 更新2位计数器状态
+        
+        alt jump=1 (实际跳转)
+            EX->>BTB: jump_PC, jump_dist
+            BTB->>BTB: 更新BTB表项
+            EX->>PC: PC_update=1
+            PC->>PC: PC = jump_dist
+        end
+    end
+```
+#### 3.3 完整流水线流程
+```mermaid
+flowchart LR
+    subgraph IF["IF阶段"]
+        A1[读取PC]
+        A2[BHT预测]
+        A3[BTB查表]
+        A4[生成next_PC]
+    end
+    
+    subgraph ID["ID阶段"]
+        B1[指令译码]
+        B2[读取寄存器]
+    end
+    
+    subgraph EX["EX阶段"]
+        C1[ALU计算]
+        C2[JCU判断]
+        C3[更新BHT]
+        C4[更新BTB]
+    end
+    
+    IF -->|取指| ID
+    ID -->|执行| EX
+    EX -->|反馈| IF
+    
+    A2 -.->|serch_en| A4
+    A3 -.->|BTB_hit, target| A4
+    C2 -.->|jump, is_JBtype| C3
+    C2 -.->|jump_PC, jump_dist| C4
+    C3 -.->|更新BHT状态| A2
+    C4 -.->|更新BTB表项| A3
+```
+### 性能优化与关键特点
+#### 4.1 延迟优化
+* 组合逻辑PC更新：next_PC使用assign组合逻辑，减少时钟周期延迟
 
+* Bubble控制：暂停时PC不更新，保持流水线稳定性
 
+* 两级预测：BHT提供方向预测，BTB提供目标地址
 
+#### 4.2 预测准确率提升
+* 2位饱和计数器：对分支模式有一定容忍度，避免频繁震荡
 
+* 仅在跳转指令时更新：减少不必要的状态变化
 
+* 强/弱区分：提供置信度信息，避免单次误判导致预测反转
 
+#### 4.3 错误恢复
+* `PC_update`优先级最高：当实际跳转时，直接使用jump_dist覆盖预测结果
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-四、性能优化与关键特点
-4.1 延迟优化
-组合逻辑PC更新：next_PC使用assign组合逻辑，减少时钟周期延迟
-
-Bubble控制：暂停时PC不更新，保持流水线稳定性
-
-两级预测：BHT提供方向预测，BTB提供目标地址
-
-4.2 预测准确率提升
-2位饱和计数器：对分支模式有一定容忍度，避免频繁震荡
-
-仅在跳转指令时更新：减少不必要的状态变化
-
-强/弱区分：提供置信度信息，避免单次误判导致预测反转
-
-4.3 错误恢复
-PC_update优先级最高：当实际跳转时，直接使用jump_dist覆盖预测结果
-
-clean信号配合：预测错误时冲刷流水线，恢复正确PC
+* `clean`信号配合：预测错误时冲刷流水线，恢复正确PC
