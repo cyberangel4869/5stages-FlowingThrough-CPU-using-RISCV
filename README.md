@@ -149,3 +149,117 @@ clean：指令冲刷
 we/waddr/wdata：寄存器写回控制
 
 data1_update/data2_update：数据前传使能
+
+## 分支预测
+分支预测由BTB和BHT配合完成
+### PC_BTB 模块结构
+#### 1.1 模块组成
+```mermaid
+flowchart TB
+    subgraph PC_BTB["PC_BTB 模块"]
+        PC_Reg["PC寄存器<br/>(32位)"]
+        BTB_MEM["BTB存储阵列<br/>256项 × {tag[21:0], target[31:0]}"]
+        Index_Gen["索引生成<br/>PC[9:2]"]
+        Tag_Gen["标签生成<br/>PC[31:10]"]
+        Hit_Detect["命中检测<br/>tag == PC_tag && target != 0"]
+        PC_Update_Logic["PC更新逻辑<br/>(组合逻辑)"]
+        PC_add4_Gen["PC+4生成"]
+        
+        PC_Reg --> Index_Gen
+        PC_Reg --> Tag_Gen
+        Index_Gen --> BTB_MEM
+        Tag_Gen --> Hit_Detect
+        BTB_MEM --> Hit_Detect
+        Hit_Detect --> PC_Update_Logic
+        PC_Update_Logic --> PC_Reg
+        PC_Reg --> PC_add4_Gen
+        
+        PC_Update --> PC_Update_Logic
+        serch_en --> PC_Update_Logic
+        jump_PC --> PC_Update_Logic
+        jump_dist --> PC_Update_Logic
+        Bubble --> PC_Reg
+    end
+```
+#### 1.2 关键数据结构
+* BTB存储：256项直接映射缓存
+
+    * tag[21:0]：存储PC的高22位用于地址匹配
+
+    * target[31:0]：存储分支跳转的目标地址
+
+* 索引计算：PC[9:2]（8位地址，256项）
+
+* 命中条件：tag[index] == PC[31:10] && target[index] != 0
+
+#### 1.3 PC更新逻辑
+```iverilog
+next_PC = PC_update ? jump_dist :                    // ① 分支实际跳转
+          (serch_en && BTB_hit) ? target[index] :    // ② BTB预测跳转
+          PC + 3'd4;                                 // ③ 顺序执行
+```
+优先级：分支实际跳转 > BTB预测跳转 > 顺序执行
+
+### BHT 模块结构
+#### 2.1 状态机设计
+使用2位饱和计数器实现4状态分支预测：
+
+| 状态编码 | 状态含义 | 预测输出 |
+|:-------:|:-------:|:-------|
+| 00 |	强不跳（Strongly Not Taken）|	0 |
+| 01 |	弱不跳（Weakly Not Taken） |	0 |
+| 10 |	弱跳转（Weakly Taken） |	1 |
+| 11 |	强跳转（Strongly Taken） |	1 |
+#### 2.2 状态转移图
+#### 2.3 更新条件
+仅在 is_JBtype=1 时更新状态（跳转类指令）
+
+根据实际 jump 信号更新计数器状态
+
+状态值向跳转/不跳转方向饱和变化
+
+三、协同工作流程
+3.1 预测阶段（IF阶段）
+3.2 更新阶段（EX阶段）
+3.3 完整流水线流程
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+四、性能优化与关键特点
+4.1 延迟优化
+组合逻辑PC更新：next_PC使用assign组合逻辑，减少时钟周期延迟
+
+Bubble控制：暂停时PC不更新，保持流水线稳定性
+
+两级预测：BHT提供方向预测，BTB提供目标地址
+
+4.2 预测准确率提升
+2位饱和计数器：对分支模式有一定容忍度，避免频繁震荡
+
+仅在跳转指令时更新：减少不必要的状态变化
+
+强/弱区分：提供置信度信息，避免单次误判导致预测反转
+
+4.3 错误恢复
+PC_update优先级最高：当实际跳转时，直接使用jump_dist覆盖预测结果
+
+clean信号配合：预测错误时冲刷流水线，恢复正确PC
